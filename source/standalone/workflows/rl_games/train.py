@@ -26,6 +26,7 @@ parser.add_argument(
 parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint.")
 parser.add_argument("--sigma", type=str, default=None, help="The policy's initial standard deviation.")
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
+parser.add_argument("--wandb", action="store_true", default=False, help="Use wandb to track the training progress")
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -65,6 +66,11 @@ from omni.isaac.lab_tasks.utils.wrappers.rl_games import RlGamesGpuEnv, RlGamesV
 
 @hydra_task_config(args_cli.task, "rl_games_cfg_entry_point")
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: dict):
+    """Initialize wandb if necessary"""
+    if int(os.getenv("RANK", "0")) == 0 and args_cli.wandb:
+        from utilis import initialize_wandb
+        initialize_wandb(args_cli)
+        
     """Train with RL-Games agent."""
     # override configurations with non-hydra CLI arguments
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs

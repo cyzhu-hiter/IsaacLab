@@ -37,6 +37,8 @@ x-default-isaac-lab-volumes: &default-isaac-lab-volumes
   - type: bind
     source: ../source
     target: ${DOCKER_ISAACLAB_PATH}/source
+    # This read_only feature guarantee the change of localized external packages can reflect immediately in the container
+    # e.g. editable rl_games (for now)
     read_only: False
   - type: bind
     source: ../docs
