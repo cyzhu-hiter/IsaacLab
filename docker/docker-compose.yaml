@@ -37,6 +37,7 @@ x-default-isaac-lab-volumes: &default-isaac-lab-volumes
   - type: bind
     source: ../source
     target: ${DOCKER_ISAACLAB_PATH}/source
+    read_only: False
   - type: bind
     source: ../docs
     target: ${DOCKER_ISAACLAB_PATH}/docs
