@@ -120,8 +120,7 @@ class RayVecEnv(IVecEnv):
     Each worker is executed asynchronously.
 
     """
-    import ray
-
+    
     def __init__(self, config_name, num_actors, **kwargs):
         """Initialise the class. Sets up the config for the environment and creates individual workers to manage.
 
@@ -131,6 +130,7 @@ class RayVecEnv(IVecEnv):
             **kwargs: Misc. kwargs passed on to the environment creator function within the RayWorker __init__
 
         """
+        import ray # delay import
         self.config_name = config_name
         self.num_actors = num_actors
         self.use_torch = False
