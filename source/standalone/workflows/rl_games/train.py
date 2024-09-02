@@ -8,6 +8,7 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import time
 import sys
 
 from omni.isaac.lab.app import AppLauncher
@@ -17,7 +18,7 @@ parser = argparse.ArgumentParser(description="Train an RL agent with RL-Games.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
-parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
+parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate on single GPU.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
 parser.add_argument(
@@ -27,6 +28,15 @@ parser.add_argument("--checkpoint", type=str, default=None, help="Path to model 
 parser.add_argument("--sigma", type=str, default=None, help="The policy's initial standard deviation.")
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
 parser.add_argument("--wandb", action="store_true", default=False, help="Use wandb to track the training progress")
+
+# extra parallel reinforcement learning related hyperparameters
+parser.add_argument("-tuning_param", type=str, default='mb', choices=['mb', 'me', 'np', 'ne'],
+                    help="Select the parameter to be tuned: 'mb' for minibatch size, 'me' for mini epochs, 'np' for number of GPUs per node, or 'ne' for number of environments per GPU.")
+parser.add_argument("--minibatch_size", type=int, default=None, help="The size of each minibatch during training.")
+parser.add_argument("--mini_epochs", type=int, default=None, help="The number of mini epochs to run during training.")
+
+# extra argument flag to decide if it's an optimization or pre-experiment
+parser.add_argument("--pre-ex", action="store_true", default=False, help="Flag to indicate if the run is a pre-experiment for exploring hyperparameter influence.")
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -63,17 +73,13 @@ import omni.isaac.lab_tasks  # noqa: F401
 from omni.isaac.lab_tasks.utils.hydra import hydra_task_config
 from omni.isaac.lab_tasks.utils.wrappers.rl_games import RlGamesGpuEnv, RlGamesVecEnvWrapper
 
+from utilis import WandbManager, adjust_gpu_parameters
+
 
 @hydra_task_config(args_cli.task, "rl_games_cfg_entry_point")
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: dict):
-    """Initialize wandb if necessary"""
-    if int(os.getenv("RANK", "0")) == 0 and args_cli.wandb:
-        from utilis import initialize_wandb
-        initialize_wandb(args_cli)
-        
-    """Train with RL-Games agent."""
+    "Parameter Management with overriding"
     # override configurations with non-hydra CLI arguments
-    env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
     agent_cfg["params"]["seed"] = args_cli.seed if args_cli.seed is not None else agent_cfg["params"]["seed"]
     agent_cfg["params"]["config"]["max_epochs"] = (
         args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg["params"]["config"]["max_epochs"]
@@ -84,7 +90,29 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: dict):
         agent_cfg["params"]["load_path"] = resume_path
         print(f"[INFO]: Loading model checkpoint from: {agent_cfg['params']['load_path']}")
     train_sigma = float(args_cli.sigma) if args_cli.sigma is not None else None
+    
+    # override configurations with PRL related arguments
+    if args_cli.num_envs is not None:
+        env_cfg = adjust_gpu_parameters(env_cfg, args_cli.num_envs)
+        env_cfg.scene.num_envs = args_cli.num_envs
+    args_cli.num_envs = env_cfg.scene.num_envs
+    agent_cfg["params"]["config"]["minibatch_size"] = (
+        args_cli.minibatch_size if args_cli.minibatch_size is not None else agent_cfg["params"]["config"]["minibatch_size"]
+    )
+    args_cli.minibatch_size = agent_cfg["params"]["config"]["minibatch_size"]
+    agent_cfg["params"]["config"]["mini_epochs"] = (
+        args_cli.mini_epochs if args_cli.mini_epochs is not None else agent_cfg["params"]["config"]["mini_epochs"]
+    )
+    args_cli.mini_epochs = agent_cfg["params"]["config"]["mini_epochs"]
+    args_cli.num_nodes = int(os.getenv("NUM_NODES", "1"))
+    args_cli.nproc_per_node = int(int(os.getenv("WORLD_SIZE", "1"))/args_cli.num_nodes)
+    
+    """Initialize wandb if necessary"""
+    if int(os.getenv("RANK", "0")) == 0 and args_cli.wandb:
+        wandb_manager = WandbManager()
+        wandb_manager.initialize(args_cli)
 
+    """Train with RL-Games agent."""
     # multi-gpu training config
     if args_cli.distributed:
         agent_cfg["params"]["seed"] += app_launcher.global_rank
@@ -157,10 +185,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: dict):
 
     # close the simulator
     env.close()
+    
+    # close wandb
+    if int(os.getenv("RANK", "0")) == 0 and args_cli.wandb:
+        wandb_manager.finish()
 
 
 if __name__ == "__main__":
     # run the main function
     main()
     # close sim app
+    time.sleep(2)  # delay to ensure all resources are released
     simulation_app.close()
