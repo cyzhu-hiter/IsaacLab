@@ -328,6 +328,7 @@ class A2CBase(BaseAlgorithm):
     def trancate_gradients_and_step(self):
         if self.multi_gpu:
             # batch allreduce ops: see https://github.com/entity-neural-network/incubator/pull/220
+            grad_sync_start_time = time.perf_counter()
             all_grads_list = []
             for param in self.model.parameters():
                 if param.grad is not None:
@@ -342,7 +343,11 @@ class A2CBase(BaseAlgorithm):
                         all_grads[offset : offset + param.numel()].view_as(param.grad.data) / self.world_size
                     )
                     offset += param.numel()
-
+                    
+            # Check if grad_sync_times exists and is a list before appending
+            if hasattr(self, 'grad_sync_times') and isinstance(self.grad_sync_times, list):
+                self.grad_sync_times.append(time.perf_counter() - grad_sync_start_time)
+            
         if self.truncate_grads:
             self.scaler.unscale_(self.optimizer)
             nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_norm)
@@ -1184,6 +1189,11 @@ class ContinuousA2CBase(A2CBase):
 
     def train_epoch(self):
         super().train_epoch()
+        
+        def sync_time_measure(kl):
+            start_time = time.perf_counter()
+            dist.all_reduce(kl, op=dist.ReduceOp.SUM)
+            return kl, time.perf_counter() - start_time
 
         self.set_eval()
         play_time_start = time.perf_counter()
@@ -1209,11 +1219,17 @@ class ContinuousA2CBase(A2CBase):
         b_losses = []
         entropies = []
         kls = []
+        self.grad_sync_times = []
+        kl_sync_times = []
+        grad_calc_times = []
 
         for mini_ep in range(0, self.mini_epochs_num):
             ep_kls = []
             for i in range(len(self.dataset)):
+                grad_calc_start_time = time.perf_counter()
                 a_loss, c_loss, entropy, kl, last_lr, lr_mul, cmu, csigma, b_loss = self.train_actor_critic(self.dataset[i])
+                
+                grad_calc_times.append(time.perf_counter() - grad_calc_start_time - self.grad_sync_times[-1])
                 a_losses.append(a_loss)
                 c_losses.append(c_loss)
                 ep_kls.append(kl)
@@ -1223,17 +1239,19 @@ class ContinuousA2CBase(A2CBase):
 
                 self.dataset.update_mu_sigma(cmu, csigma)
                 if self.schedule_type == 'legacy':
-                    av_kls = kl
                     if self.multi_gpu:
-                        dist.all_reduce(kl, op=dist.ReduceOp.SUM)
-                        av_kls /= self.world_size
+                        kls, kl_sync_time = sync_time_measure(kl)
+                        av_kls = kls / self.world_size
+                        kl_sync_times.append(kl_sync_time)
+                        
                     self.last_lr, self.entropy_coef = self.scheduler.update(self.last_lr, self.entropy_coef, self.epoch_num, 0, av_kls.item())
                     self.update_lr(self.last_lr)
 
             av_kls = torch_ext.mean_list(ep_kls)
             if self.multi_gpu:
-                dist.all_reduce(av_kls, op=dist.ReduceOp.SUM)
-                av_kls /= self.world_size
+                kls, kl_sync_time = sync_time_measure(kl)
+                av_kls = kls / self.world_size
+                kl_sync_times.append(kl_sync_time)
             if self.schedule_type == 'standard':
                 self.last_lr, self.entropy_coef = self.scheduler.update(self.last_lr, self.entropy_coef, self.epoch_num, 0, av_kls.item())
                 self.update_lr(self.last_lr)
@@ -1248,7 +1266,8 @@ class ContinuousA2CBase(A2CBase):
         update_time = update_time_end - update_time_start
         total_time = update_time_end - play_time_start
 
-        return batch_dict['step_time'], play_time, update_time, total_time, a_losses, c_losses, b_losses, entropies, kls, last_lr, lr_mul
+        return batch_dict['step_time'], play_time, update_time, total_time, a_losses, c_losses, b_losses, entropies, kls, last_lr, lr_mul,\
+            self.grad_sync_times, kl_sync_times, grad_calc_times
 
     def prepare_dataset(self, batch_dict):
         obses = batch_dict['obses']
@@ -1331,7 +1350,28 @@ class ContinuousA2CBase(A2CBase):
 
         while True:
             epoch_num = self.update_epoch()
-            step_time, play_time, update_time, sum_time, a_losses, c_losses, b_losses, entropies, kls, last_lr, lr_mul = self.train_epoch()
+            """
+            # NOTE: Elboration on PRL key variables
+            step_time -> float: horizon_length * env_step(action) execution time
+            play_time -> float: play_steps execution time
+            update_time -> float: one epoch backward propagation time, related to mini_epoch_nums
+                and size of dataset. Includes network update, hyperparameter update, synchronization.
+                Whole learner execution time
+            sum_time -> float: one epoch total execution time
+            grad_sync_times -> list[float]: When multi_gpu is True, one all_reduce execution time and saved as a list.
+                List length is either mini_epoch_nums (standard) or groups of mini-batch + mini_epoch_nums(legacy)
+            kl_sync_times -> list[float]: When multi_gpu is True, one all_reduce execution time and saved as a list.
+                List length is either mini_epoch_nums (standard) or groups of mini-batch + mini_epoch_nums(legacy)
+            grad_calc_times -> list[float]: single mini-batch back propagation time.
+            
+            Based on Ian notes:
+            Trajectory collection time -> play_time
+            Sync time - AllReduce time -> sync_times
+            Grad calc time - before AllReduce -> grad_calc_times
+            """
+            
+            step_time, play_time, update_time, sum_time, a_losses, c_losses, b_losses, entropies, kls, last_lr, lr_mul,\
+                grad_sync_times, kl_sync_times, grad_calc_times = self.train_epoch()
             total_time += sum_time
             frame = self.frame // self.num_agents
 
@@ -1353,6 +1393,8 @@ class ContinuousA2CBase(A2CBase):
                 self.write_stats(total_time, epoch_num, step_time, play_time, update_time,
                                 a_losses, c_losses, entropies, kls, last_lr, lr_mul, frame,
                                 scaled_time, scaled_play_time, curr_frames)
+                
+                self.write_prl_stats(step_time, play_time, update_time, total_time, grad_sync_times, kl_sync_times, grad_calc_times, frame)
 
                 if len(b_losses) > 0:
                     self.writer.add_scalar('losses/bounds_loss', torch_ext.mean_list(b_losses).item(), frame)
@@ -1427,6 +1469,18 @@ class ContinuousA2CBase(A2CBase):
                 should_exit = should_exit_t.float().item()
             if should_exit:
                 return self.last_mean_rewards, epoch_num
-
-            if should_exit:
-                return self.last_mean_rewards, epoch_num
+    
+    def write_prl_stats(self, step_time, play_time, update_time, total_time, grad_sync_times, kl_sync_times, grad_calc_times, frame):
+        # All the time are measured in epoch length except total time
+        self.writer.add_scalar('prl_stats/step_time', step_time, frame)
+        self.writer.add_scalar('prl_stats/play_time', play_time, frame)
+        self.writer.add_scalar('prl_stats/update_time', update_time, frame)
+        self.writer.add_scalar('prl_stats/total_time', total_time, frame)
+        self.writer.add_scalar('prl_stats/sum_grad_calc_time', sum(grad_calc_times), frame)
+        self.writer.add_scalar('prl_stats/avg_grad_calc_time', sum(grad_calc_times)/len(grad_calc_times), frame)
+        if self.multi_gpu:
+            self.writer.add_scalar('prl_stats/sum_grad_sync_time', sum(grad_sync_times), frame)
+            self.writer.add_scalar('prl_stats/avg_grad_sync_time', sum(grad_sync_times)/len(grad_sync_times), frame)
+            self.writer.add_scalar('prl_stats/sum_kl_sync_time', sum(kl_sync_times), frame)
+            self.writer.add_scalar('prl_stats/avg_kl_sync_time', sum(kl_sync_times)/len(kl_sync_times), frame)
+        return
