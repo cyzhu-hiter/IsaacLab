@@ -1,17 +1,11 @@
 from common.generate_grid import grid_search
 
 # Define your parameter ranges
-# num_envs_values = [2048, 4096, 8192, 16384]
-# nproc_per_node_values = [1, 2, 4, 8]
-# mini_epoch_values = [2, 4, 6, 8, 10, 12]
-# minibatch_size_values = [8192, 16384, 32768, 65536]
-# seed_values = [101, 102, 103]
-
-num_envs_values = [1024, 2048]
-nproc_per_node_values = [1]
-mini_epoch_values = [2]
-minibatch_size_values = [8192]
-seed_values = [101, 102]
+num_envs_values = [2048, 4096, 8192, 16384]
+nproc_per_node_values = [1, 2, 4, 8]
+mini_epoch_values = [2, 4, 6, 8, 10, 12]
+minibatch_size_values = [8192, 16384, 32768, 65536]
+seed_values = [101, 102, 103]
 
 # Default values specific to Isaac-Ant-v0 task
 default_num_envs = 4096
