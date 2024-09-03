@@ -48,7 +48,7 @@ class WandbManager:
         # Construct the run name using the extracted task name
         run_name = f"{prefix}_{task_name}_{args_cli.tuning_param}_{args_cli.minibatch_size}mb_" \
                    f"{args_cli.mini_epochs}me_{args_cli.num_envs}ne_" \
-                   f"{args_cli.num_nodes}nn_{args_cli.nproc_per_node}np_" \
+                   f"{args_cli.num_nodes}nn_{args_cli.nproc_per_node}np_{args_cli.seed}seed_" \
                    f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
         wandb.init(
