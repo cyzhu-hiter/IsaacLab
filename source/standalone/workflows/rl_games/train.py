@@ -30,7 +30,7 @@ parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy 
 parser.add_argument("--wandb", action="store_true", default=False, help="Use wandb to track the training progress")
 
 # extra parallel reinforcement learning related hyperparameters
-parser.add_argument("-tuning_param", type=str, default='mb', choices=['mb', 'me', 'np', 'ne'],
+parser.add_argument("--tuning_param", type=str, default='mb', choices=['mb', 'me', 'np', 'ne'],
                     help="Select the parameter to be tuned: 'mb' for minibatch size, 'me' for mini epochs, 'np' for number of GPUs per node, or 'ne' for number of environments per GPU.")
 parser.add_argument("--minibatch_size", type=int, default=None, help="The size of each minibatch during training.")
 parser.add_argument("--mini_epochs", type=int, default=None, help="The number of mini epochs to run during training.")
