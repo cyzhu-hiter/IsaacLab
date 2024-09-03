@@ -35,8 +35,9 @@ parser.add_argument("--tuning_param", type=str, default='mb', choices=['mb', 'me
 parser.add_argument("--minibatch_size", type=int, default=None, help="The size of each minibatch during training.")
 parser.add_argument("--mini_epochs", type=int, default=None, help="The number of mini epochs to run during training.")
 
-# extra argument flag to decide if it's an optimization or pre-experiment
+# extra argument
 parser.add_argument("--pre-ex", action="store_true", default=False, help="Flag to indicate if the run is a pre-experiment for exploring hyperparameter influence.")
+parser.add_argument("--max_time", type=int, default=None, help="Maximum time for this task to train")
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -106,6 +107,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg, agent_cfg: dict):
     args_cli.mini_epochs = agent_cfg["params"]["config"]["mini_epochs"]
     args_cli.num_nodes = int(os.getenv("NUM_NODES", "1"))
     args_cli.nproc_per_node = int(int(os.getenv("WORLD_SIZE", "1"))/args_cli.num_nodes)
+    agent_cfg["params"]["config"]["max_time"] = args_cli.max_time if args_cli.max_time is not None else 10e6
     
     """Initialize wandb if necessary"""
     if int(os.getenv("RANK", "0")) == 0 and args_cli.wandb:

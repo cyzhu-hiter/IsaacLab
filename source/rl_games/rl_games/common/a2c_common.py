@@ -165,6 +165,7 @@ class A2CBase(BaseAlgorithm):
         self.ppo = config.get('ppo', True)
         self.max_epochs = self.config.get('max_epochs', -1)
         self.max_frames = self.config.get('max_frames', -1)
+        self.max_time = self.config.get('max_time', 1e6)
 
         self.is_adaptive_lr = config['lr_schedule'] == 'adaptive'
         self.linear_lr = config['lr_schedule'] == 'linear'
@@ -1240,8 +1241,8 @@ class ContinuousA2CBase(A2CBase):
                 self.dataset.update_mu_sigma(cmu, csigma)
                 if self.schedule_type == 'legacy':
                     if self.multi_gpu:
-                        kls, kl_sync_time = sync_time_measure(kl)
-                        av_kls = kls / self.world_size
+                        kl, kl_sync_time = sync_time_measure(kl)
+                        av_kls = kl / self.world_size
                         kl_sync_times.append(kl_sync_time)
                         
                     self.last_lr, self.entropy_coef = self.scheduler.update(self.last_lr, self.entropy_coef, self.epoch_num, 0, av_kls.item())
@@ -1249,8 +1250,8 @@ class ContinuousA2CBase(A2CBase):
 
             av_kls = torch_ext.mean_list(ep_kls)
             if self.multi_gpu:
-                kls, kl_sync_time = sync_time_measure(kl)
-                av_kls = kls / self.world_size
+                kl, kl_sync_time = sync_time_measure(kl)
+                av_kls = kl / self.world_size
                 kl_sync_times.append(kl_sync_time)
             if self.schedule_type == 'standard':
                 self.last_lr, self.entropy_coef = self.scheduler.update(self.last_lr, self.entropy_coef, self.epoch_num, 0, av_kls.item())
@@ -1459,6 +1460,16 @@ class ContinuousA2CBase(A2CBase):
                     self.save(os.path.join(self.nn_dir, 'last_' + self.config['name'] + '_frame_' + str(self.frame) \
                         + '_rew_' + str(mean_rewards).replace('[', '_').replace(']', '_')))
                     print('MAX FRAMES NUM!')
+                    should_exit = True
+                    
+                if (time.perf_counter() - start_time) >= self.max_time:
+                    if self.game_rewards.current_size == 0:
+                        print('WARNING: Max time reached before any env terminated at least once')
+                        mean_rewards = -np.inf
+
+                    self.save(os.path.join(self.nn_dir, 'last_' + self.config['name'] + '_ep_' + str(epoch_num) \
+                        + '_rew_' + str(mean_rewards).replace('[', '_').replace(']', '_')))
+                    print('MAX TIME NUM!')
                     should_exit = True
 
                 update_time = 0
