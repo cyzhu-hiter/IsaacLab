@@ -29,7 +29,7 @@ def log_run_status(log_file, task, num_envs, nproc_per_node, mini_epoch, minibat
             log.write(f"Wall Time: {wall_time:.2f} seconds\n")
         log.write("-" * 50 + "\n")
 
-def run_training(task, num_envs, nproc_per_node, mini_epoch, minibatch_size, seed, tuning_param, tuning_value, max_time=1e6):
+def run_training(task, num_envs, nproc_per_node, mini_epoch, minibatch_size, seed, tuning_param, tuning_value, max_time=1e6, max_iterations=1e5):
     """
     Execute the training command with the specified parameters and log the results.
 
@@ -43,6 +43,7 @@ def run_training(task, num_envs, nproc_per_node, mini_epoch, minibatch_size, see
     - tuning_param (str): The parameter being tuned (e.g., 'mb' for minibatch size).
     - tuning_value (int/str): The value of the parameter being tuned.
     - max_time (float): Maximum allowed time for the training in seconds.
+    - max_iterations (int): Maximum number of iterations for the training.
     """
     log_file = "/workspace/isaaclab/source/training_schedule/training_log.txt"  # Absolute path to the log file
 
@@ -51,7 +52,7 @@ def run_training(task, num_envs, nproc_per_node, mini_epoch, minibatch_size, see
         f"source/standalone/workflows/rl_games/train.py --task={task} "
         f"--headless --distributed --wandb --pre-ex --num_envs {num_envs} "
         f"--mini_epoch {mini_epoch} --minibatch_size {minibatch_size} "
-        f"--seed {seed} --tuning_param {tuning_param} --max_time {max_time}"
+        f"--seed {seed} --tuning_param {tuning_param} --max_time {max_time} --max_iterations {max_iterations}"
     )
     
     print(f"Running task: {task}, Tuning {tuning_param}={tuning_value}, Seed={seed}")

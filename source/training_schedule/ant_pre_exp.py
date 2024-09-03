@@ -12,7 +12,8 @@ default_num_envs = 4096
 default_nproc_per_node = 2
 default_mini_epoch = 8
 default_minibatch_size = 32768
-default_max_time = 360  # Set the maximum time for each run
+default_max_time = 180  # Set the maximum time for each run
+default_max_iterations = 1e5  # Set the maximum iterations for each run
 
 # Call the grid search function for Isaac-Ant-v0 task
 grid_search(
@@ -26,5 +27,6 @@ grid_search(
     default_nproc_per_node=default_nproc_per_node,
     default_mini_epoch=default_mini_epoch,
     default_minibatch_size=default_minibatch_size,
-    max_time=default_max_time
+    max_time=default_max_time,
+    max_iterations=default_max_iterations
 )
