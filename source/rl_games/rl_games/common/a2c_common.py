@@ -1230,6 +1230,8 @@ class ContinuousA2CBase(A2CBase):
                 grad_calc_start_time = time.perf_counter()
                 a_loss, c_loss, entropy, kl, last_lr, lr_mul, cmu, csigma, b_loss = self.train_actor_critic(self.dataset[i])
                 
+                if not self.multi_gpu:
+                    self.grad_sync_times.append(0)
                 grad_calc_times.append(time.perf_counter() - grad_calc_start_time - self.grad_sync_times[-1])
                 a_losses.append(a_loss)
                 c_losses.append(c_loss)
@@ -1244,7 +1246,8 @@ class ContinuousA2CBase(A2CBase):
                         kl, kl_sync_time = sync_time_measure(kl)
                         av_kls = kl / self.world_size
                         kl_sync_times.append(kl_sync_time)
-                        
+                    else:
+                        av_kls = kl
                     self.last_lr, self.entropy_coef = self.scheduler.update(self.last_lr, self.entropy_coef, self.epoch_num, 0, av_kls.item())
                     self.update_lr(self.last_lr)
 
