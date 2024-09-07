@@ -26,10 +26,10 @@ from omni.isaac.lab.utils.math import quat_conjugate, quat_from_angle_axis, quat
 @configclass
 class FrankaReachEnvCfg(DirectRLEnvCfg):
     # env
-    episode_length_s = 8.3333  # 500 timesteps
+    episode_length_s = 4.1667 # 250 timesteps # 8.3333  # 500 timesteps
     decimation = 2
     num_actions = 9
-    num_observations = 15
+    num_observations = 21
     num_states = 0
 
     # simulation
@@ -47,7 +47,7 @@ class FrankaReachEnvCfg(DirectRLEnvCfg):
     )
 
     # scene
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=2048, env_spacing=3.0, replicate_physics=True)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=3.0, replicate_physics=True)
 
     # robot
     robot = ArticulationCfg(
@@ -134,7 +134,7 @@ class FrankaReachEnvCfg(DirectRLEnvCfg):
     )
 
     # target position for the reach task
-    goal_pos = torch.tensor([0.5, 0.0, 0.25])
+    goal_pos = torch.tensor([0.45, 0.0, 0.25])
 
         # ground plane
     terrain = TerrainImporterCfg(
@@ -150,8 +150,8 @@ class FrankaReachEnvCfg(DirectRLEnvCfg):
         ),
     )
 
-    action_scale = 1
-    dof_velocity_scale = 0.1
+    action_scale = 0.1
+    # dof_velocity_scale = 0.1
 
     # reward scales
     dist_reward_scale = 2.0
@@ -212,7 +212,7 @@ class FrankaReachEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor):
         self.actions = actions.clone().clamp(-1.0, 1.0)
-        targets = self.robot_dof_targets + self.cfg.dof_velocity_scale * self.dt * self.actions * self.cfg.action_scale
+        targets = self.robot_dof_targets + self.dt * self.actions * self.cfg.action_scale
         self.robot_dof_targets[:] = torch.clamp(targets, self.robot_dof_lower_limits, self.robot_dof_upper_limits)
 
     def _apply_action(self):
@@ -250,9 +250,9 @@ class FrankaReachEnv(DirectRLEnv):
         self._robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
 
         # Randomize new goal positions within the reach range
-        rand_x = sample_uniform(-0.25, 0.1, (len(env_ids),), device=self.device)
-        rand_y = sample_uniform(-0.2, 0.2, (len(env_ids),), device=self.device)
-        rand_z = sample_uniform(-0.2, 0.1, (len(env_ids),), device=self.device)
+        rand_x = sample_uniform(-0.12, 0.12, (len(env_ids),), device=self.device)
+        rand_y = sample_uniform(-0.15, 0.15, (len(env_ids),), device=self.device)
+        rand_z = sample_uniform(-0.1, 0.1, (len(env_ids),), device=self.device)
 
         new_pos = torch.stack((rand_x, rand_y, rand_z), dim=-1)
         self.goal_pos[env_ids] = new_pos + self.goal_pos_init[env_ids, :] + self.scene.env_origins[env_ids, :]
@@ -276,14 +276,15 @@ class FrankaReachEnv(DirectRLEnv):
             / (self.robot_dof_upper_limits - self.robot_dof_lower_limits)
             - 1.0
         )
+        dof_vel = self._robot.data.joint_vel
         fingertip_pos_w = self._robot.data.body_pos_w[:, self.arm_fingertip_index]
-        # to_target = self.goal_pos - fingertip_pos_w
-        goal_pos = self.goal_pos - self.scene.env_origins
-        fingertip_pos = fingertip_pos_w - self.scene.env_origins
+        to_target = self.goal_pos - fingertip_pos_w
+        # goal_pos = self.goal_pos - self.scene.env_origins
+        # fingertip_pos = fingertip_pos_w - self.scene.env_origins
 
         obs = torch.cat((dof_pos_scaled,
-                         goal_pos,
-                         fingertip_pos),
+                         dof_vel,
+                         to_target),
                          dim=-1)
         return {"policy": torch.clamp(obs, -5.0, 5.0)}
 
